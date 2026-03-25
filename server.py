@@ -16,13 +16,13 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
-import yaml
-
 import anyio
 import boxlite
+import yaml
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import ImageContent, TextContent, Tool
+from retry import Retry, combine_stop_conditions, stop_after_attempt, wait_exponential
 
 # Configure logging to stderr only (to avoid interfering with MCP stdio protocol)
 logging.basicConfig(
@@ -105,6 +105,16 @@ def _format_run_result(result) -> str:
         parts.append(f"error: {result.error_message}")
     return "\n".join(parts)
 
+@Retry(
+    stop_condition=combine_stop_conditions(
+        lambda _a, err, _r: err is None or 'unexpected message: InitReady' not in str(err),
+        stop_after_attempt(5),
+    ),
+    wait_condition=wait_exponential(),
+    before_sleep=lambda _: logger.info('Retrying...'),
+)
+async def retry_if_unready(f):
+    return await f()
 
 class BoxManagementHandler:
     """Handler for cross-cutting box management operations.
@@ -377,13 +387,13 @@ class CodeInterpreterToolHandler:
         run_kwargs = {}
         if timeout is not None:
             run_kwargs["timeout"] = timeout
-        output = await interpreter.run(code, **run_kwargs)
+        output = await retry_if_unready(lambda: interpreter.run(code, **run_kwargs))
         return {"output": output}
 
     async def install(self, interpreter_id: str, packages: list[str], **kwargs) -> dict:
         """Install Python packages in the interpreter."""
         interpreter = self._get_interpreter(interpreter_id)
-        output = await interpreter.install_packages(*packages)
+        output = await retry_if_unready(lambda: interpreter.install_packages(*packages))
         return {"output": output}
 
     async def shutdown_all(self):
