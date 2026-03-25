@@ -8,11 +8,15 @@ Provides multiple sandbox tools:
 - code_interpreter: Python code execution sandbox
 - sandbox: Generic container for shell commands
 """
+import argparse
 import logging
 import random
 import socket
 import sys
+from dataclasses import dataclass
 from typing import Optional
+
+import yaml
 
 import anyio
 import boxlite
@@ -27,6 +31,23 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("boxlite-mcp")
+
+
+@dataclass
+class Config:
+    """Server configuration."""
+
+    @classmethod
+    def from_file(cls, path: str) -> 'Config':
+        """Load configuration from a YAML file."""
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+        return cls(**data)
+
+    @classmethod
+    def default(cls) -> 'Config':
+        """Return a default configuration."""
+        return cls()
 
 
 def find_available_port(start: int = 10000, end: int = 65535) -> int:
@@ -716,7 +737,7 @@ class ComputerToolHandler:
         return {"x": x, "y": y}
 
 
-async def main():
+async def main(config: Config):
     """Main entry point for the MCP server."""
     logger.info("Starting BoxLite MCP Server")
 
@@ -1392,7 +1413,23 @@ Screen resolution is 1024x768 pixels.""",
 
 def run():
     """Sync entry point for CLI."""
-    anyio.run(main)
+    parser = argparse.ArgumentParser(description='BoxLite MCP Server')
+    parser.add_argument(
+        '-c',
+        '--config',
+        metavar='config.yaml',
+        default=None,
+        help='Path to a configuration file (not yet implemented)',
+    )
+
+    args = parser.parse_args()
+    if args.config is not None:
+        config = Config.from_file(args.config)
+        logger.info('Loaded configuration from %s', args.config)
+    else:
+        config = Config.default()
+
+    anyio.run(main, config)
 
 
 if __name__ == "__main__":
