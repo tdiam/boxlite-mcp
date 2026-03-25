@@ -37,6 +37,8 @@ logger = logging.getLogger("boxlite-mcp")
 class Config:
     """Server configuration."""
 
+    prewarm: dict[str, dict]
+
     @classmethod
     def from_file(cls, path: str) -> 'Config':
         """Load configuration from a YAML file."""
@@ -110,13 +112,8 @@ class BoxManagementHandler:
     Provides list, get, remove, and metrics across all box types.
     """
 
-    def __init__(self, browser_handler, code_handler, sandbox_handler, computer_handler):
-        self._handlers = {
-            "browser": browser_handler,
-            "code_interpreter": code_handler,
-            "sandbox": sandbox_handler,
-            "computer": computer_handler,
-        }
+    def __init__(self, handlers):
+        self._handlers = handlers
 
     def _get_runtime(self):
         """Get the boxlite runtime (Rust singleton)."""
@@ -746,7 +743,23 @@ async def main(config: Config):
     code_handler = CodeInterpreterToolHandler()
     sandbox_handler = SandboxToolHandler()
     computer_handler = ComputerToolHandler()
-    box_handler = BoxManagementHandler(browser_handler, code_handler, sandbox_handler, computer_handler)
+
+    handler_map = {
+        'browser': browser_handler,
+        'code_interpreter': code_handler,
+        'sandbox': sandbox_handler,
+        'computer': computer_handler,
+    }
+
+    box_handler = BoxManagementHandler(handler_map)
+
+    # Pre-warm boxes declared in config
+    for box_name, box_cfg in config.prewarm.items():
+        box_type = box_cfg.pop('type')
+        handler = handler_map[box_type]
+        logger.info('Pre-warming %s box %r with kwargs %s', box_type, box_name, box_cfg)
+        await handler.start(name=box_name, **box_cfg)
+
     server = Server("boxlite")
 
     @server.list_tools()
