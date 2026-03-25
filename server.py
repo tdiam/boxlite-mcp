@@ -386,9 +386,11 @@ class CodeInterpreterToolHandler:
         interpreter = self._get_interpreter(interpreter_id)
         run_kwargs = {}
         if timeout is not None:
+            # not yet implemented
             run_kwargs["timeout"] = timeout
-        output = await retry_if_unready(lambda: interpreter.run(code, **run_kwargs))
-        return {"output": output}
+
+        res = await retry_if_unready(lambda: interpreter.exec('/usr/local/bin/python', '-c', code))
+        return {'output': _format_run_result(res)}
 
     async def install(self, interpreter_id: str, packages: list[str], **kwargs) -> dict:
         """Install Python packages in the interpreter."""
