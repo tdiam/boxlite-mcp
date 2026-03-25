@@ -114,7 +114,7 @@ class BoxManagementHandler:
     async def list_boxes(self, state: Optional[str] = None, **kwargs) -> list[dict]:
         """List all boxes managed by the runtime."""
         runtime = self._get_runtime()
-        infos = runtime.list_info()
+        infos = await runtime.list_info()
         result = [_boxinfo_to_dict(i) for i in infos]
         if state:
             result = [b for b in result if b["state"].lower() == state.lower()]
@@ -123,7 +123,7 @@ class BoxManagementHandler:
     async def get(self, box_id: str, **kwargs) -> dict:
         """Get info for a specific box by ID or name."""
         runtime = self._get_runtime()
-        info = runtime.get_info(box_id)
+        info = await runtime.get_info(box_id)
         return _boxinfo_to_dict(info)
 
     async def remove(self, box_id: str, force: bool = False, **kwargs) -> dict:
@@ -143,14 +143,14 @@ class BoxManagementHandler:
         if box_id:
             instance = self._find_box_instance(box_id)
             if instance and hasattr(instance, "_box") and instance._box:
-                m = instance._box.metrics()
+                m = await instance._box.metrics()
             else:
                 # Fall back to runtime-level get + metrics
                 runtime = self._get_runtime()
-                box = runtime.get(box_id)
+                box = await runtime.get(box_id)
                 if box is None:
                     raise RuntimeError(f"Box '{box_id}' not found")
-                m = box.metrics()
+                m = await box.metrics()
             return {
                 "cpu_percent": getattr(m, "cpu_percent", None),
                 "memory_bytes": getattr(m, "memory_bytes", None),
@@ -163,7 +163,7 @@ class BoxManagementHandler:
             }
         else:
             runtime = self._get_runtime()
-            m = runtime.metrics()
+            m = await runtime.metrics()
             return {
                 "num_running_boxes": getattr(m, "num_running_boxes", None),
                 "boxes_created_total": getattr(m, "boxes_created_total", None),
