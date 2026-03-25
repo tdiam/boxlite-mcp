@@ -130,12 +130,20 @@ class BoxManagementHandler:
         """Remove a box by ID or name."""
         runtime = self._get_runtime()
         runtime.remove(box_id, force=force)
-        # Also remove from handler dicts if present
+        # Also remove from handler dicts (by-ID and by-name) if present
         for handler in self._handlers.values():
-            for store_name in ("_browsers", "_interpreters", "_sandboxes", "_computers"):
+            for store_name, by_name_store in (
+                ("_browsers", "_browsers_by_name"),
+                ("_interpreters", "_interpreters_by_name"),
+                ("_sandboxes", "_sandboxes_by_name"),
+                ("_computers", "_computers_by_name"),
+            ):
                 store = getattr(handler, store_name, None)
                 if store and box_id in store:
-                    del store[box_id]
+                    instance = store.pop(box_id)
+                    by_name = getattr(handler, by_name_store, None)
+                    if by_name is not None and instance._name:
+                        by_name.pop(instance._name, None)
         return {"success": True}
 
     async def metrics(self, box_id: Optional[str] = None, **kwargs) -> dict:
@@ -178,12 +186,15 @@ class BrowserToolHandler:
 
     def __init__(self):
         self._browsers: dict[str, boxlite.BrowserBox] = {}
+        self._browsers_by_name: dict[str, boxlite.BrowserBox] = {}
         self._lock = anyio.Lock()
 
     def _get_browser(self, browser_id: str) -> boxlite.BrowserBox:
-        if browser_id not in self._browsers:
-            raise RuntimeError(f"Browser '{browser_id}' not found. Use 'start' action first.")
-        return self._browsers[browser_id]
+        if browser_id in self._browsers:
+            return self._browsers[browser_id]
+        if browser_id in self._browsers_by_name:
+            return self._browsers_by_name[browser_id]
+        raise RuntimeError(f"Browser '{browser_id}' not found. Use 'start' action first.")
 
     async def start(self, name: Optional[str] = None, reuse_existing: bool = False,
                     browser: Optional[str] = None,
@@ -222,6 +233,8 @@ class BrowserToolHandler:
                     pass
                 logger.info(f"BrowserBox {browser_id} created. CDP: {cdp_endpoint}")
                 self._browsers[browser_id] = bb
+                if name:
+                    self._browsers_by_name[name] = bb
                 result = {
                     "browser_id": browser_id,
                     "endpoint": cdp_endpoint,
@@ -248,7 +261,9 @@ class BrowserToolHandler:
             except BaseException as e:
                 logger.error(f"Error during BrowserBox {browser_id} cleanup: {e}", exc_info=True)
             finally:
-                del self._browsers[browser_id]
+                bb = self._browsers.pop(browser_id, None)
+                if bb is not None and bb._name:
+                    self._browsers_by_name.pop(bb._name, None)
             return {"success": True}
 
     async def run_command(self, browser_id: str, command: str, **kwargs) -> dict:
@@ -271,6 +286,7 @@ class BrowserToolHandler:
                 except BaseException as e:
                     logger.error(f"Error during BrowserBox {browser_id} cleanup: {e}", exc_info=True)
             self._browsers.clear()
+            self._browsers_by_name.clear()
 
 
 class CodeInterpreterToolHandler:
@@ -278,12 +294,15 @@ class CodeInterpreterToolHandler:
 
     def __init__(self):
         self._interpreters: dict[str, boxlite.CodeBox] = {}
+        self._interpreters_by_name: dict[str, boxlite.CodeBox] = {}
         self._lock = anyio.Lock()
 
     def _get_interpreter(self, interpreter_id: str) -> boxlite.CodeBox:
-        if interpreter_id not in self._interpreters:
-            raise RuntimeError(f"Interpreter '{interpreter_id}' not found. Use 'start' action first.")
-        return self._interpreters[interpreter_id]
+        if interpreter_id in self._interpreters:
+            return self._interpreters[interpreter_id]
+        if interpreter_id in self._interpreters_by_name:
+            return self._interpreters_by_name[interpreter_id]
+        raise RuntimeError(f"Interpreter '{interpreter_id}' not found. Use 'start' action first.")
 
     async def start(self, name: Optional[str] = None, reuse_existing: bool = False,
                     cpus: Optional[int] = None,
@@ -307,6 +326,8 @@ class CodeInterpreterToolHandler:
                 interpreter_id = interpreter.id
                 logger.info(f"CodeBox {interpreter_id} created")
                 self._interpreters[interpreter_id] = interpreter
+                if name:
+                    self._interpreters_by_name[name] = interpreter
                 return {"interpreter_id": interpreter_id, "created": interpreter.created}
             except BaseException as e:
                 error_msg = f"Failed to start CodeBox: {e}"
@@ -326,7 +347,9 @@ class CodeInterpreterToolHandler:
             except BaseException as e:
                 logger.error(f"Error during CodeBox {interpreter_id} cleanup: {e}", exc_info=True)
             finally:
-                del self._interpreters[interpreter_id]
+                interp = self._interpreters.pop(interpreter_id, None)
+                if interp is not None and interp._name:
+                    self._interpreters_by_name.pop(interp._name, None)
             return {"success": True}
 
     async def run(self, interpreter_id: str, code: str, timeout: Optional[int] = None,
@@ -355,6 +378,7 @@ class CodeInterpreterToolHandler:
                 except BaseException as e:
                     logger.error(f"Error during CodeBox {interpreter_id} cleanup: {e}", exc_info=True)
             self._interpreters.clear()
+            self._interpreters_by_name.clear()
 
 
 class SandboxToolHandler:
@@ -362,12 +386,15 @@ class SandboxToolHandler:
 
     def __init__(self):
         self._sandboxes: dict[str, boxlite.SimpleBox] = {}
+        self._sandboxes_by_name: dict[str, boxlite.SimpleBox] = {}
         self._lock = anyio.Lock()
 
     def _get_sandbox(self, sandbox_id: str) -> boxlite.SimpleBox:
-        if sandbox_id not in self._sandboxes:
-            raise RuntimeError(f"Sandbox '{sandbox_id}' not found. Use 'start' action first.")
-        return self._sandboxes[sandbox_id]
+        if sandbox_id in self._sandboxes:
+            return self._sandboxes[sandbox_id]
+        if sandbox_id in self._sandboxes_by_name:
+            return self._sandboxes_by_name[sandbox_id]
+        raise RuntimeError(f"Sandbox '{sandbox_id}' not found. Use 'start' action first.")
 
     async def start(self, image: str, name: Optional[str] = None,
                     reuse_existing: bool = False,
@@ -406,6 +433,8 @@ class SandboxToolHandler:
                 sandbox_id = sandbox.id
                 logger.info(f"SimpleBox {sandbox_id} created (new={sandbox.created})")
                 self._sandboxes[sandbox_id] = sandbox
+                if name:
+                    self._sandboxes_by_name[name] = sandbox
                 return {"sandbox_id": sandbox_id, "created": sandbox.created}
             except BaseException as e:
                 error_msg = f"Failed to start SimpleBox: {e}"
@@ -425,7 +454,9 @@ class SandboxToolHandler:
             except BaseException as e:
                 logger.error(f"Error during SimpleBox {sandbox_id} cleanup: {e}", exc_info=True)
             finally:
-                del self._sandboxes[sandbox_id]
+                sb = self._sandboxes.pop(sandbox_id, None)
+                if sb is not None and sb._name:
+                    self._sandboxes_by_name.pop(sb._name, None)
             return {"success": True}
 
     async def run_command(self, sandbox_id: str, command: str,
@@ -466,6 +497,7 @@ class SandboxToolHandler:
                 except BaseException as e:
                     logger.error(f"Error during SimpleBox {sandbox_id} cleanup: {e}", exc_info=True)
             self._sandboxes.clear()
+            self._sandboxes_by_name.clear()
 
 
 class ComputerToolHandler:
@@ -477,13 +509,16 @@ class ComputerToolHandler:
 
     def __init__(self):
         self._computers: dict[str, boxlite.ComputerBox] = {}
+        self._computers_by_name: dict[str, boxlite.ComputerBox] = {}
         self._lock = anyio.Lock()
 
     def _get_computer(self, computer_id: str) -> boxlite.ComputerBox:
-        """Get a ComputerBox by ID."""
-        if computer_id not in self._computers:
-            raise RuntimeError(f"Computer '{computer_id}' not found. Use 'start' action first.")
-        return self._computers[computer_id]
+        """Get a ComputerBox by ID or name."""
+        if computer_id in self._computers:
+            return self._computers[computer_id]
+        if computer_id in self._computers_by_name:
+            return self._computers_by_name[computer_id]
+        raise RuntimeError(f"Computer '{computer_id}' not found. Use 'start' action first.")
 
     async def start(self, name: Optional[str] = None, reuse_existing: bool = False,
                     cpus: int = 4, memory_mib: int = 4096,
@@ -516,6 +551,8 @@ class ComputerToolHandler:
                 logger.info(f"Desktop {computer_id} is ready")
 
                 self._computers[computer_id] = computer
+                if name:
+                    self._computers_by_name[name] = computer
                 return {
                     "computer_id": computer_id,
                     "gui_http_port": gui_http_port,
@@ -542,7 +579,9 @@ class ComputerToolHandler:
             except BaseException as e:
                 logger.error(f"Error during ComputerBox {computer_id} cleanup: {e}", exc_info=True)
             finally:
-                del self._computers[computer_id]
+                comp = self._computers.pop(computer_id, None)
+                if comp is not None and comp._name:
+                    self._computers_by_name.pop(comp._name, None)
 
             return {"success": True}
 
@@ -570,6 +609,7 @@ class ComputerToolHandler:
                         exc_info=True,
                     )
             self._computers.clear()
+            self._computers_by_name.clear()
 
     # Action handlers - delegation to ComputerBox API
 
