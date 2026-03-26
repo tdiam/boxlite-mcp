@@ -80,6 +80,18 @@ def find_available_port(start: int = 10000, end: int = 65535) -> int:
     raise RuntimeError(f"Could not find an available port in range {start}-{end}")
 
 
+def default_box_options(**kwargs) -> dict:
+    security = boxlite.SecurityOptions.maximum()
+    security.jailer_enabled = False
+
+    return {
+        **kwargs,
+        'advanced': boxlite.boxlite.AdvancedBoxOptions(
+            security=security,
+        ),
+    }
+
+
 def _boxinfo_to_dict(info) -> dict:
     """Convert a BoxInfo object to a JSON-serializable dict."""
     return {
@@ -234,7 +246,7 @@ class BrowserToolHandler:
             try:
                 logger.info("Creating BrowserBox...")
                 # BrowserBox takes a BrowserBoxOptions for browser config
-                opts_kwargs = {}
+                opts_kwargs = default_box_options()
                 if browser:
                     opts_kwargs["browser"] = browser
                 if cpus is not None:
@@ -340,7 +352,7 @@ class CodeInterpreterToolHandler:
         async with self._lock:
             try:
                 logger.info("Creating CodeBox...")
-                code_kwargs = {}
+                code_kwargs = default_box_options()
                 if image:
                     code_kwargs["image"] = image
                 if cpus is not None:
@@ -437,7 +449,7 @@ class SandboxToolHandler:
         async with self._lock:
             try:
                 logger.info(f"Creating SimpleBox with image '{image}'...")
-                sandbox_kwargs: dict = {}
+                sandbox_kwargs: dict = default_box_options()
                 if cpus is not None:
                     sandbox_kwargs["cpus"] = cpus
                 if memory_mib is not None:
@@ -560,12 +572,12 @@ class ComputerToolHandler:
                 gui_https_port = find_available_port()
                 logger.info(f"Creating ComputerBox with ports HTTP={gui_http_port}, HTTPS={gui_https_port}...")
 
-                computer_kwargs = {
-                    "cpu": cpus,
-                    "memory": memory_mib,
-                    "gui_http_port": gui_http_port,
-                    "gui_https_port": gui_https_port,
-                }
+                computer_kwargs = default_box_options(
+                    cpu=cpus,
+                    memory=memory_mib,
+                    gui_http_port=gui_http_port,
+                    gui_https_port=gui_https_port,
+                )
                 if volumes:
                     computer_kwargs["volumes"] = [tuple(v) for v in volumes]
 
