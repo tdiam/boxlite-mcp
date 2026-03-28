@@ -37,6 +37,7 @@ logger = logging.getLogger("boxlite-mcp")
 class Config:
     """Server configuration."""
 
+    env: dict[str, str]
     prewarm: dict[str, dict]
 
     @classmethod
@@ -50,6 +51,22 @@ class Config:
     def default(cls) -> 'Config':
         """Return a default configuration."""
         return cls()
+
+    def default_box_options(self, **kwargs) -> dict:
+        security = boxlite.SecurityOptions.maximum()
+        security.jailer_enabled = False
+
+        return {
+            **kwargs,
+            'env': list({**self.env, **kwargs.get('env', {})}.items()),
+            'volumes': [
+                (v['host'], v['guest'], 'ro' if v.get('read_only') else 'rw')
+                for v in self.volumes
+            ],
+            'advanced': boxlite.boxlite.AdvancedBoxOptions(
+                security=security,
+            ),
+        }
 
 
 def find_available_port(start: int = 10000, end: int = 65535) -> int:
@@ -78,18 +95,6 @@ def find_available_port(start: int = 10000, end: int = 65535) -> int:
             continue
 
     raise RuntimeError(f"Could not find an available port in range {start}-{end}")
-
-
-def default_box_options(**kwargs) -> dict:
-    security = boxlite.SecurityOptions.maximum()
-    security.jailer_enabled = False
-
-    return {
-        **kwargs,
-        'advanced': boxlite.boxlite.AdvancedBoxOptions(
-            security=security,
-        ),
-    }
 
 
 def _boxinfo_to_dict(info) -> dict:
@@ -224,10 +229,11 @@ class BoxManagementHandler:
 class BrowserToolHandler:
     """Handler for browser tool actions."""
 
-    def __init__(self):
+    def __init__(self, config: Config):
         self._browsers: dict[str, boxlite.BrowserBox] = {}
         self._browsers_by_name: dict[str, boxlite.BrowserBox] = {}
         self._lock = anyio.Lock()
+        self.config = config
 
     def _get_browser(self, browser_id: str) -> boxlite.BrowserBox:
         if browser_id in self._browsers:
@@ -246,7 +252,7 @@ class BrowserToolHandler:
             try:
                 logger.info("Creating BrowserBox...")
                 # BrowserBox takes a BrowserBoxOptions for browser config
-                opts_kwargs = default_box_options()
+                opts_kwargs = self.config.default_box_options()
                 if browser:
                     opts_kwargs["browser"] = browser
                 if cpus is not None:
@@ -332,10 +338,11 @@ class BrowserToolHandler:
 class CodeInterpreterToolHandler:
     """Handler for code_interpreter tool actions."""
 
-    def __init__(self):
+    def __init__(self, config: Config):
         self._interpreters: dict[str, boxlite.CodeBox] = {}
         self._interpreters_by_name: dict[str, boxlite.CodeBox] = {}
         self._lock = anyio.Lock()
+        self.config = config
 
     def _get_interpreter(self, interpreter_id: str) -> boxlite.CodeBox:
         if interpreter_id in self._interpreters:
@@ -352,13 +359,14 @@ class CodeInterpreterToolHandler:
         async with self._lock:
             try:
                 logger.info("Creating CodeBox...")
-                code_kwargs = default_box_options()
+                code_kwargs = self.config.default_box_options()
                 if image:
                     code_kwargs["image"] = image
                 if cpus is not None:
                     code_kwargs["cpus"] = cpus
                 if memory_mib is not None:
                     code_kwargs["memory_mib"] = memory_mib
+
                 interpreter = boxlite.CodeBox(
                     name=name, reuse_existing=reuse_existing, **code_kwargs
                 )
@@ -426,10 +434,11 @@ class CodeInterpreterToolHandler:
 class SandboxToolHandler:
     """Handler for sandbox tool actions."""
 
-    def __init__(self):
+    def __init__(self, config: Config):
         self._sandboxes: dict[str, boxlite.SimpleBox] = {}
         self._sandboxes_by_name: dict[str, boxlite.SimpleBox] = {}
         self._lock = anyio.Lock()
+        self.config = config
 
     def _get_sandbox(self, sandbox_id: str) -> boxlite.SimpleBox:
         if sandbox_id in self._sandboxes:
@@ -449,7 +458,7 @@ class SandboxToolHandler:
         async with self._lock:
             try:
                 logger.info(f"Creating SimpleBox with image '{image}'...")
-                sandbox_kwargs: dict = default_box_options()
+                sandbox_kwargs: dict = self.config.default_box_options()
                 if cpus is not None:
                     sandbox_kwargs["cpus"] = cpus
                 if memory_mib is not None:
@@ -457,7 +466,9 @@ class SandboxToolHandler:
                 if disk_size_gb is not None:
                     sandbox_kwargs["disk_size_gb"] = disk_size_gb
                 if env:
-                    sandbox_kwargs["env"] = list(env.items())
+                    sandbox_kwargs['env'] = list(
+                        {**{k: v for k, v in sandbox_kwargs.get('env', [])}, **env}.items()
+                    )
                 if working_dir:
                     sandbox_kwargs["working_dir"] = working_dir
                 if network is not None:
@@ -549,10 +560,11 @@ class ComputerToolHandler:
     Manages multiple ComputerBox instances and delegates MCP tool calls to their APIs.
     """
 
-    def __init__(self):
+    def __init__(self, config: Config):
         self._computers: dict[str, boxlite.ComputerBox] = {}
         self._computers_by_name: dict[str, boxlite.ComputerBox] = {}
         self._lock = anyio.Lock()
+        self.config = config
 
     def _get_computer(self, computer_id: str) -> boxlite.ComputerBox:
         """Get a ComputerBox by ID or name."""
@@ -572,7 +584,7 @@ class ComputerToolHandler:
                 gui_https_port = find_available_port()
                 logger.info(f"Creating ComputerBox with ports HTTP={gui_http_port}, HTTPS={gui_https_port}...")
 
-                computer_kwargs = default_box_options(
+                computer_kwargs = self.config.default_box_options(
                     cpu=cpus,
                     memory=memory_mib,
                     gui_http_port=gui_http_port,
@@ -763,10 +775,10 @@ async def main(config: Config):
     logger.info("Starting BoxLite MCP Server")
 
     # Create handlers and server
-    browser_handler = BrowserToolHandler()
-    code_handler = CodeInterpreterToolHandler()
-    sandbox_handler = SandboxToolHandler()
-    computer_handler = ComputerToolHandler()
+    browser_handler = BrowserToolHandler(config=config)
+    code_handler = CodeInterpreterToolHandler(config=config)
+    sandbox_handler = SandboxToolHandler(config=config)
+    computer_handler = ComputerToolHandler(config=config)
 
     handler_map = {
         'browser': browser_handler,
@@ -1458,6 +1470,8 @@ def run():
         default=None,
         help='Path to a configuration file (not yet implemented)',
     )
+
+    args = parser.parse_args()
 
     args = parser.parse_args()
     if args.config is not None:
