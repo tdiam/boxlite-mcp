@@ -39,6 +39,7 @@ class Config:
 
     env: dict[str, str]
     prewarm: dict[str, dict]
+    volumes: list[dict]
 
     @classmethod
     def from_file(cls, path: str) -> 'Config':
@@ -60,7 +61,7 @@ class Config:
             **kwargs,
             'env': list({**self.env, **kwargs.get('env', {})}.items()),
             'volumes': [
-                (v['host'], v['guest'], 'ro' if v.get('read_only') else 'rw')
+                (v['host'], v['guest'], v.get('read_only'))
                 for v in self.volumes
             ],
             'advanced': boxlite.boxlite.AdvancedBoxOptions(
@@ -474,7 +475,7 @@ class SandboxToolHandler:
                 if network is not None:
                     sandbox_kwargs["network"] = network
                 if volumes:
-                    sandbox_kwargs["volumes"] = [tuple(v) for v in volumes]
+                    sandbox_kwargs["volumes"] = sandbox_kwargs.get("volumes", []) + [tuple(v) for v in volumes]
                 if ports:
                     sandbox_kwargs["ports"] = [tuple(p) for p in ports]
 
@@ -591,7 +592,7 @@ class ComputerToolHandler:
                     gui_https_port=gui_https_port,
                 )
                 if volumes:
-                    computer_kwargs["volumes"] = [tuple(v) for v in volumes]
+                    computer_kwargs["volumes"] = computer_kwargs.get("volumes", []) + [tuple(v) for v in volumes]
 
                 computer = boxlite.ComputerBox(
                     name=name, reuse_existing=reuse_existing, **computer_kwargs
