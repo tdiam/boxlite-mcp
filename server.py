@@ -13,7 +13,7 @@ import logging
 import random
 import socket
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import anyio
@@ -37,9 +37,9 @@ logger = logging.getLogger("boxlite-mcp")
 class Config:
     """Server configuration."""
 
-    env: dict[str, str]
-    prewarm: dict[str, dict]
-    volumes: list[dict]
+    env: dict[str, str] = field(default_factory=dict)
+    prewarm: dict[str, dict] = field(default_factory=dict)
+    volumes: list[dict] = field(default_factory=list)
 
     @classmethod
     def from_file(cls, path: str) -> 'Config':
